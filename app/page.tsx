@@ -1,4 +1,7 @@
+"use client";
+
 import AppointmentBooking from "../components/AppointmentBooking";
+import VisitorCounter from "../components/VisitorCounter";
 
 const BUSINESS = {
   name: "Brothers Erkek Kuaförü",
@@ -7,198 +10,309 @@ const BUSINESS = {
   phone: "+90 555 588 42 56",
   phoneHref: "tel:+905555884256",
   instagram: "@brothers_erkek_kuaforu",
-  instagramHref: "https://www.instagram.com/brothers_erkek_kuaforu/",
+  instagramHref:
+    "https://www.instagram.com/brothers_erkek_kuaforu/",
   mapsHref:
     "https://www.google.com/maps/search/?api=1&query=G%C3%BCzelyal%C4%B1+Mah.+56%2F2+Sok.+No%3A1B+Konak+%C4%B0zmir",
-  whatsappHref: "https://wa.me/905555884256",
-  rating: 4.9,
-  reviewCount: 128,
 } as const;
 
-const SERVICES = ["Saç Kesimi", "Sakal", "Çocuk", "Saç + Sakal"] as const;
-
-/* ─── Primitives ─── */
-
-function IconButton({
-  href,
-  icon,
-  label,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  const isTel = href.startsWith("tel:");
-  return (
-    <a
-      href={href}
-      target={isTel ? undefined : "_blank"}
-      rel={isTel ? undefined : "noopener noreferrer"}
-      className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 text-[13px] font-medium text-zinc-300 transition-all duration-200 hover:border-[#C9A962]/20 hover:bg-white/[0.06] active:scale-[0.98] sm:py-3"
-    >
-      <span className="text-[#C9A962]">{icon}</span>
-      <span className="hidden sm:inline">{label}</span>
-    </a>
-  );
-}
-
-/* ─── Icons ─── */
-
-function StarIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-[#C9A962]" aria-hidden>
-      <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.651l-4.753-.381-1.83-4.401Z" clipRule="evenodd" />
-    </svg>
-  );
-}
+const WEEKLY_OCCUPANCY = [
+  { day: "Pazartesi", short: "Pzt", percentage: 70 },
+  { day: "Salı", short: "Sal", percentage: 45 },
+  { day: "Çarşamba", short: "Çar", percentage: 85 },
+  { day: "Perşembe", short: "Per", percentage: 60 },
+  { day: "Cuma", short: "Cum", percentage: 90 },
+  { day: "Cumartesi", short: "Cmt", percentage: 95 },
+  { day: "Pazar", short: "Paz", percentage: 0 },
+] as const;
 
 function MapPinIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4 shrink-0" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" />
+      <circle cx="12" cy="10" r="2.5" />
     </svg>
   );
 }
 
-function PhoneIcon() {
+function ClockIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
-    </svg>
-  );
-}
-
-function WhatsAppIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden>
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z" />
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
     </svg>
   );
 }
 
 function InstagramIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3h9A4.5 4.5 0 0 1 21 7.5v9a4.5 4.5 0 0 1-4.5 4.5h-9A4.5 4.5 0 0 1 3 16.5v-9A4.5 4.5 0 0 1 7.5 3Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z" />
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17.5" cy="6.5" r="0.8" fill="currentColor" />
     </svg>
   );
 }
 
-function MapsIcon() {
+function LogoMark() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z" />
-    </svg>
-  );
-}
-
-/* ─── Sections ─── */
-
-function BrandPanel() {
-  return (
-    <div className="flex h-full flex-col justify-center px-1 lg:px-4">
-      <div className="animate-fade-in mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#C9A962]/15 bg-[#C9A962]/[0.08] text-2xl shadow-[0_0_24px_-4px_rgba(201,169,98,0.2)]">
+    <div className="flex h-16 w-16 items-center justify-center rounded-full border border-[#C9A962]/30 bg-black/20 shadow-[0_8px_30px_rgba(0,0,0,0.25)]">
+      <span className="text-3xl" aria-hidden="true">
         💈
-      </div>
+      </span>
+    </div>
+  );
+}
 
-      <h1 className="animate-fade-in text-[clamp(1.5rem,3vw,2.25rem)] font-semibold leading-tight tracking-[-0.03em] text-white">
-        {BUSINESS.name}
-      </h1>
-      <p className="animate-fade-in mt-1.5 text-sm font-medium tracking-wide text-[#C9A962]/80 sm:text-[15px]">
-        {BUSINESS.tagline}
-      </p>
+function OccupancyBar({ percentage }: { percentage: number }) {
+  return (
+    <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+      <div
+        className="h-full rounded-full bg-[#C9A962] transition-all duration-700"
+        style={{ width: `${percentage}%` }}
+      />
+    </div>
+  );
+}
 
-      <div className="animate-fade-in mt-4 flex items-center gap-2">
-        <div className="flex items-center gap-1">
-          <StarIcon />
-          <span className="text-sm font-semibold text-white">{BUSINESS.rating}</span>
+function WeeklyOccupancy() {
+  return (
+    <section className="glass-card rounded-3xl p-5 sm:p-6">
+      <div className="mb-5 flex items-end justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#C9A962]">
+            Randevu Durumu
+          </p>
+          <h2 className="mt-1 text-xl font-semibold text-white">
+            Haftalık Doluluk
+          </h2>
         </div>
-        <span className="text-zinc-600">·</span>
-        <span className="text-sm text-zinc-500">{BUSINESS.reviewCount} değerlendirme</span>
+
+        <span className="text-xs text-zinc-500">
+          Bu hafta
+        </span>
       </div>
 
-      <a
-        href={BUSINESS.mapsHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="animate-fade-in mt-4 flex items-start gap-2 text-sm leading-snug text-zinc-500 transition-colors hover:text-zinc-300"
-      >
-        <MapPinIcon />
-        <span>{BUSINESS.address}</span>
-      </a>
+      <div className="space-y-4">
+        {WEEKLY_OCCUPANCY.map((item) => (
+          <div key={item.day}>
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+              <span className="text-sm text-zinc-300">
+                <span className="sm:hidden">{item.short}</span>
+                <span className="hidden sm:inline">{item.day}</span>
+              </span>
 
-      <a
-        href="#booking"
-        className="animate-fade-in mt-6 inline-flex h-14 w-full items-center justify-center rounded-2xl bg-[#C9A962] text-base font-semibold text-black shadow-[0_4px_24px_-4px_rgba(201,169,98,0.5)] transition-all duration-200 hover:bg-[#D4B872] active:scale-[0.98] sm:mt-8 lg:h-[3.75rem] lg:text-lg"
-      >
-        Randevu Al
-      </a>
-    </div>
-  );
-}
+              <span
+                className={`text-xs font-semibold ${
+                  item.percentage >= 90
+                    ? "text-[#D7B66D]"
+                    : item.percentage === 0
+                      ? "text-zinc-600"
+                      : "text-zinc-400"
+                }`}
+              >
+                {item.percentage === 0
+                  ? "Kapalı"
+                  : `%${item.percentage}`}
+              </span>
+            </div>
 
-function ServiceCard({ name }: { name: string }) {
-  return (
-    <div className="flex flex-1 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 text-center text-[13px] font-medium text-zinc-300 transition-all duration-200 hover:border-[#C9A962]/15 hover:bg-white/[0.05] sm:py-3.5 sm:text-sm">
-      {name}
-    </div>
-  );
-}
-
-function BottomBar() {
-  return (
-    <div className="shrink-0 space-y-3 border-t border-white/[0.04] px-4 py-4 sm:px-6 lg:px-8 lg:py-5">
-      <div className="mx-auto flex max-w-6xl gap-2 sm:gap-3">
-        {SERVICES.map((service) => (
-          <ServiceCard key={service} name={service} />
+            <OccupancyBar percentage={item.percentage} />
+          </div>
         ))}
       </div>
-      <div className="mx-auto flex max-w-6xl gap-2 sm:gap-3">
-        <IconButton href={BUSINESS.phoneHref} icon={<PhoneIcon />} label="Ara" />
-        <IconButton href={BUSINESS.whatsappHref} icon={<WhatsAppIcon />} label="WhatsApp" />
-        <IconButton href={BUSINESS.instagramHref} icon={<InstagramIcon />} label="Instagram" />
-        <IconButton href={BUSINESS.mapsHref} icon={<MapsIcon />} label="Google Maps" />
+    </section>
+  );
+}
+
+function InfoCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="glass-card rounded-2xl p-4">
+      <div className="mb-2 flex items-center gap-2 text-[#C9A962]">
+        {icon}
+        <span className="text-xs font-semibold uppercase tracking-[0.16em]">
+          {title}
+        </span>
+      </div>
+
+      <div className="text-sm leading-relaxed text-zinc-400">
+        {children}
       </div>
     </div>
   );
 }
-
-/* ─── Page ─── */
 
 export default function Home() {
   return (
-    <>
-      <style>{`
-        @keyframes fade-in {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in {
-          animation: fade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .animate-fade-in { animation: none; }
-        }
-      `}</style>
+    <div className="wood-background min-h-dvh text-white">
+      {/* Visitor counter */}
+      <div className="fixed right-4 top-4 z-50 sm:right-6 sm:top-6">
+        <VisitorCounter />
+      </div>
 
-      <div className="flex min-h-dvh flex-col bg-[#050505] font-sans text-white lg:h-dvh lg:overflow-hidden">
-        <div aria-hidden className="pointer-events-none fixed inset-0 -z-10">
-          <div className="absolute left-0 top-0 h-[50vh] w-[50vw] bg-[radial-gradient(ellipse,rgba(201,169,98,0.08)_0%,transparent_70%)]" />
+      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+        {/* Header */}
+        <header className="animate-fade-in flex flex-col items-center text-center">
+          <LogoMark />
+
+          <h1 className="mt-5 text-[clamp(1.8rem,4vw,3rem)] font-semibold tracking-[-0.04em] text-white">
+            {BUSINESS.name}
+          </h1>
+
+          <p className="mt-2 text-sm font-medium tracking-[0.18em] text-[#C9A962] sm:text-[15px]">
+            {BUSINESS.tagline}
+          </p>
+
+          <a
+            href={BUSINESS.mapsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 flex items-center gap-2 text-xs text-zinc-500 transition-colors hover:text-zinc-300 sm:text-sm"
+          >
+            <MapPinIcon />
+            <span>{BUSINESS.address}</span>
+          </a>
+        </header>
+
+        {/* Main content */}
+        <div className="mt-8 grid gap-5 lg:mt-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)] lg:gap-6">
+          {/* Left */}
+          <section className="animate-fade-in-delay flex flex-col">
+            <div className="glass-card flex flex-1 flex-col rounded-3xl p-5 sm:p-7">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#C9A962]">
+                  Brothers
+                </p>
+
+                <h2 className="mt-2 max-w-xl text-2xl font-semibold leading-tight tracking-[-0.03em] text-white sm:text-3xl">
+                  Tarzını yenile.
+                  <br />
+                  <span className="text-[#C9A962]">
+                    Randevunu şimdi oluştur.
+                  </span>
+                </h2>
+
+                <p className="mt-4 max-w-lg text-sm leading-6 text-zinc-400">
+                  Size uygun günü ve saati seçerek hızlıca
+                  randevunuzu oluşturabilirsiniz.
+                </p>
+              </div>
+
+              <div className="mt-7">
+                <a
+                  href="#booking"
+                  className="flex h-14 w-full items-center justify-center rounded-2xl bg-[#C9A962] px-6 text-base font-semibold text-black shadow-[0_8px_30px_rgba(201,169,98,0.22)] transition-all duration-200 hover:bg-[#D7B66D] hover:shadow-[0_10px_35px_rgba(201,169,98,0.3)] active:scale-[0.98] sm:h-16 sm:text-lg"
+                >
+                  Randevu Al
+                </a>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <InfoCard
+                  icon={<ClockIcon />}
+                  title="Çalışma Saatleri"
+                >
+                  <div>Pazartesi - Cumartesi</div>
+                  <div className="mt-1 text-white">
+                    10:00 - 21:00
+                  </div>
+                  <div className="mt-1 text-zinc-600">
+                    Pazar kapalı
+                  </div>
+                </InfoCard>
+
+                <InfoCard
+                  icon={<MapPinIcon />}
+                  title="Konum"
+                >
+                  <a
+                    href={BUSINESS.mapsHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="transition-colors hover:text-white"
+                  >
+                    {BUSINESS.address}
+                  </a>
+                </InfoCard>
+              </div>
+
+              <div className="mt-auto pt-6">
+                <a
+                  href={BUSINESS.instagramHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-zinc-300 transition-all hover:border-[#C9A962]/30 hover:bg-white/[0.06] hover:text-white"
+                >
+                  <InstagramIcon />
+                  <span>Bizi Instagram'da takip edin</span>
+                </a>
+              </div>
+            </div>
+          </section>
+
+          {/* Right */}
+          <section
+            id="booking"
+            className="animate-fade-in-delay scroll-mt-6"
+          >
+            <div className="glass-card h-full rounded-3xl p-4 sm:p-5">
+              <AppointmentBooking />
+            </div>
+          </section>
         </div>
 
-        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6 lg:min-h-0 lg:flex-row lg:items-stretch lg:gap-8 lg:px-8 lg:py-8">
-          <section className="lg:flex lg:w-[42%] lg:items-center">
-            <BrandPanel />
-          </section>
-          <section className="lg:flex lg:min-h-0 lg:w-[58%] lg:items-stretch">
-            <AppointmentBooking />
-          </section>
-        </main>
+        {/* Footer */}
+        <footer className="mt-6 flex flex-col items-center justify-between gap-3 border-t border-white/[0.06] pt-5 text-xs text-zinc-600 sm:flex-row">
+          <span>
+            © {new Date().getFullYear()} {BUSINESS.name}
+          </span>
 
-        <BottomBar />
-      </div>
-    </>
+          <a
+            href={BUSINESS.phoneHref}
+            className="transition-colors hover:text-zinc-400"
+          >
+            {BUSINESS.phone}
+          </a>
+        </footer>
+      </main>
+    </div>
   );
 }

@@ -54,24 +54,29 @@ type WeekDay = {
   isToday: boolean;
 };
 
-function getWeekDays(): WeekDay[] {
+function getWeekDays(weekOffset = 0): WeekDay[] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
   const dayOfWeek = today.getDay();
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+
   const monday = new Date(today);
-  monday.setDate(today.getDate() + mondayOffset);
+  monday.setDate(today.getDate() + mondayOffset + weekOffset * 7);
 
   return Array.from({ length: 7 }, (_, i) => {
     const date = new Date(monday);
     date.setDate(monday.getDate() + i);
+
+    const weekdayIndex = date.getDay() === 0 ? 6 : date.getDay() - 1;
+
     return {
       index: i,
       date,
       dayNum: date.getDate(),
-      short: DAY_SHORT[i],
-      occupancy: OCCUPANCY[i],
-      closed: CLOSED_DAYS.has(i),
+      short: DAY_SHORT[weekdayIndex],
+      occupancy: OCCUPANCY[weekdayIndex],
+      closed: CLOSED_DAYS.has(weekdayIndex),
       isToday: date.getTime() === today.getTime(),
     };
   });
@@ -314,7 +319,13 @@ function BookingForm({
 }
 
 export default function AppointmentBooking() {
-  const weekDays = useMemo(() => getWeekDays(), []);
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const weekDays = useMemo(
+    () => getWeekDays(weekOffset),
+    [weekOffset]
+  );
+
   const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
@@ -333,8 +344,20 @@ export default function AppointmentBooking() {
   const step = selectedTime && selectedDay ? 3 : selectedDay ? 2 : 1;
 
   function selectDay(index: number) {
-    if (CLOSED_DAYS.has(index)) return;
+    if (weekDays[index]?.closed) return;
+  
     setSelectedDayIndex(index);
+    setSelectedTime(null);
+  }
+  function changeWeek(direction: number) {
+    setWeekOffset((current) => {
+      const next = current + direction;
+  
+      // Geçmiş haftalara gitmeyi engelle
+      return Math.max(0, next);
+    });
+  
+    setSelectedDayIndex(null);
     setSelectedTime(null);
   }
 
@@ -390,9 +413,36 @@ export default function AppointmentBooking() {
         <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row-reverse lg:gap-5">
           {/* Calendar */}
           <div className="lg:w-[42%] lg:shrink-0">
-            <p className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-600">
-              Gün Seçin
-            </p>
+  <div className="mb-2.5 flex items-center justify-between">
+    <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-600">
+      Gün Seçin
+    </p>
+
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => changeWeek(-1)}
+        disabled={weekOffset === 0}
+        className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.03] text-zinc-500 transition hover:border-[#C9A962]/30 hover:text-[#C9A962] disabled:cursor-not-allowed disabled:opacity-20"
+        aria-label="Önceki hafta"
+      >
+        ‹
+      </button>
+
+      <span className="min-w-[72px] text-center text-[10px] font-medium text-zinc-600">
+        {weekOffset === 0 ? "Bu hafta" : `${weekOffset}. hafta`}
+      </span>
+
+      <button
+        type="button"
+        onClick={() => changeWeek(1)}
+        className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.03] text-zinc-500 transition hover:border-[#C9A962]/30 hover:text-[#C9A962]"
+        aria-label="Sonraki hafta"
+      >
+        ›
+      </button>
+    </div>
+  </div>
             <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
               {weekDays.map((day) => (
                 <DayCard
