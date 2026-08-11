@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDocs,
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
@@ -12,17 +13,39 @@ export type AppointmentData = {
   time: string;
   name: string;
   phone: string;
+  service: string;
 };
+
+export async function getBookedTimes(date: string): Promise<string[]> {
+  try {
+    const appointmentsRef = collection(db, "appointments");
+    const snapshot = await getDocs(appointmentsRef);
+
+    return snapshot.docs
+      .map((doc) => doc.data())
+      .filter((data) => data.date === date && data.status !== "cancelled")
+      .map((data) => data.time as string);
+  } catch (error) {
+    console.error("Randevular alınamadı:", error);
+    return [];
+  }
+}
 
 export async function createAppointment(
   appointment: AppointmentData
 ): Promise<{ success: true } | { success: false; message: string }> {
-  const { date, time, name, phone } = appointment;
+  const { date, time, name, phone, service } = appointment;
 
-  if (!date || !time || !name.trim() || !phone.trim()) {
+  if (
+    !date ||
+    !time ||
+    !name.trim() ||
+    !phone.trim() ||
+    !service.trim()
+  ) {
     return {
       success: false,
-      message: "Lütfen tarih, saat, ad ve telefon bilgilerini doldurun.",
+      message: "Lütfen tüm bilgileri doldurun.",
     };
   }
 
@@ -46,6 +69,7 @@ export async function createAppointment(
         time,
         name: name.trim(),
         phone: phone.trim(),
+        service: service.trim(),
         status: "confirmed",
         createdAt: serverTimestamp(),
       });
@@ -61,7 +85,7 @@ export async function createAppointment(
     ) {
       return {
         success: false,
-        message: "Bu saat daha önce alınmış. Lütfen başka bir saat seçin.",
+        message: "Bu saat az önce başka bir müşteri tarafından alındı.",
       };
     }
 

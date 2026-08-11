@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { createAppointment } from "@/services/appointmentService";
-import { db } from "@/lib/firebase";
+import {
+  createAppointment,
+  getBookedTimes,
+} from "@/services/appointmentService";
 
 const SERVICES = ["Saç Kesimi", "Sakal", "Çocuk", "Saç + Sakal"] as const;
 
@@ -490,39 +491,30 @@ export default function AppointmentBooking() {
       : null;
 
   useEffect(() => {
-    if (!selectedDay || selectedDay.closed) {
-      setBookedTimes([]);
-      setLoadingBookedTimes(false);
-      return;
-    }
+    let cancelled = false;
 
-    setLoadingBookedTimes(true);
+    async function loadBookedTimes() {
+      if (!selectedDay || selectedDay.closed) {
+        setBookedTimes([]);
+        return;
+      }
 
-    const dateKey = formatDateKey(selectedDay.date);
-    const appointmentsQuery = query(
-      collection(db, "appointments"),
-      where("date", "==", dateKey)
-    );
+      setLoadingBookedTimes(true);
 
-    const unsubscribe = onSnapshot(
-      appointmentsQuery,
-      (snapshot) => {
-        const times = snapshot.docs
-          .map((appointment) => appointment.data())
-          .filter((data) => data.status !== "cancelled")
-          .map((data) => data.time as string);
+      const dateKey = formatDateKey(selectedDay.date);
+      const times = await getBookedTimes(dateKey);
 
+      if (!cancelled) {
         setBookedTimes(times);
         setLoadingBookedTimes(false);
-      },
-      (error) => {
-        console.error("Randevu durumu dinlenemedi:", error);
-        setBookedTimes([]);
-        setLoadingBookedTimes(false);
       }
-    );
+    }
 
-    return () => unsubscribe();
+    loadBookedTimes();
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedDay]);
 
   const slots = useMemo(() => {

@@ -1,0 +1,14 @@
+BROTHERS ADMIN PANEL — SPRINT 3.1
+
+1) Projede app/admin klasörünü oluşturun.
+2) Bu paketteki app/admin/page.tsx dosyasını buraya kopyalayın.
+3) Firebase Console > Authentication > Sign-in method bölümünde Email/Password'u etkinleştirin.
+4) Authentication > Users bölümünden admin kullanıcı hesabını oluşturun.
+5) Proje klasöründe:
+   npm run build
+6) Build başarılıysa:
+   npm run dev
+7) Tarayıcı:
+   http://localhost:3000/admin
+
+Not: Admin sorgusu date + time sıralaması kullandığı için Firestore composite index isteyebilir. Admin ekranında index hatası çıkarsa Firebase'in hata mesajındaki index oluşturma bağlantısını kullanın.
