@@ -13,6 +13,7 @@ import {
 
 import { db } from "@/lib/firebase";
 import type {
+  setDoc,
   Appointment,
   AppointmentStatus,
   CreateAppointmentResult,
@@ -113,9 +114,9 @@ export async function getBookedTimes(barberId: string, date: string) {
   try {
     const q = query(
       collection(db, COLLECTION),
-      where("barberId", "==", barberId),
       where("date", "==", date),
-      where("status", "in", ["confirmed", "pending"])
+      // "confirmed", "pending" ve "blocked" olan tüm saatleri dolu kabul et
+      where("status", "in", ["confirmed", "pending", "blocked"])
     );
     
     const snapshot = await getDocs(q);
@@ -150,3 +151,25 @@ export async function updateAppointmentStatus(
     };
   }
 }
+/**
+ * Adminin istediği tarih ve saati manuel olarak randevulara kapatmasını sağlar.
+ */
+export async function blockTimeSlot(date: string, time: string, reason: string = "Dolu / Kapalı") {
+  const ref = doc(collection(db, COLLECTION), slotId(date, time));
+
+  try {
+    await setDoc(ref, {
+      date,
+      time,
+      name: "SİSTEM / ADMİN",
+      phone: "-",
+      service: reason,
+      status: "blocked", // Müşterilere kapalı olduğunu belirten durum
+      createdAt: serverTimestamp(),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Saat kapatılırken hata oluştu:", error);
+    return { success: false, message: "Saat kapatılamadı." };
+  }
+} 

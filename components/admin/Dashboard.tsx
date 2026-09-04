@@ -1,4 +1,5 @@
 "use client";
+import { AdminBlockSlot } from "./AdminBlockSlot";
 
 import { useEffect, useMemo, useState } from "react";
 import { signOut, type User } from "firebase/auth";
