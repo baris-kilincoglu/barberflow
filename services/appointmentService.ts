@@ -1,10 +1,13 @@
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
+  query,
   runTransaction,
   serverTimestamp,
   updateDoc,
+  where,
   type Unsubscribe,
 } from "firebase/firestore";
 
@@ -103,12 +106,47 @@ export function subscribeToAppointments(
   );
 }
 
+/**
+ * Belirli bir berber ve tarih için rezerve edilmiş saatleri getirir.
+ */
+export async function getBookedTimes(barberId: string, date: string) {
+  try {
+    const q = query(
+      collection(db, COLLECTION),
+      where("barberId", "==", barberId),
+      where("date", "==", date),
+      where("status", "in", ["confirmed", "pending"])
+    );
+    
+    const snapshot = await getDocs(q);
+    const bookedTimes = snapshot.docs.map((doc) => doc.data().time);
+    
+    return bookedTimes;
+  } catch (error) {
+    console.error("Error fetching booked times:", error);
+    return [];
+  }
+}
+
+/**
+ * Admin paneli (Dashboard.tsx) üzerinden randevu durumunu güncellemeye yarar.
+ */
 export async function updateAppointmentStatus(
   appointmentId: string,
   status: AppointmentStatus
-): Promise<void> {
-  await updateDoc(doc(db, COLLECTION, appointmentId), {
-    status,
-    updatedAt: serverTimestamp(),
-  });
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const ref = doc(db, COLLECTION, appointmentId);
+    await updateDoc(ref, {
+      status: status,
+      updatedAt: serverTimestamp(),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Randevu durumu güncellenirken hata oluştu:", error);
+    return {
+      success: false,
+      message: "Durum güncellenemedi.",
+    };
+  }
 }
