@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["192.168.1.102"],
+  async redirects() {
+    return [
+      {
+        source: "/",
+        destination: "/randevu", // Randevu sayfanızın URL rotası hangisiyse (ör. /appointment veya /booking) buraya yazın
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
