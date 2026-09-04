@@ -1,83 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { useMemo, useState } from "react";
+
 import { createAppointment } from "@/services/appointmentService";
-import { db } from "@/lib/firebase";
-
-const SERVICES = ["Saç Kesimi", "Sakal", "Çocuk", "Saç + Sakal"] as const;
-
-const OCCUPANCY = [35, 58, 72, 48, 88, 92, 0] as const;
-const CLOSED_DAYS = new Set([6]);
-
-const ALL_SLOTS = [
-  "10:00",
-  "10:30",
-  "11:00",
-  "11:30",
-  "12:00",
-  "14:00",
-  "14:30",
-  "15:00",
-  "15:30",
-  "16:00",
-  "17:00",
-  "17:30",
-  "18:00",
-  "19:00",
-  "19:30",
-  "20:00",
-] as const;
-
-const UNAVAILABLE_BY_DAY: Record<number, readonly string[]> = {
-  0: ["11:00", "15:00", "17:00"],
-  1: ["10:30", "14:00", "16:00", "19:00"],
-  2: ["10:00", "11:30", "14:30", "18:00", "19:30"],
-  3: ["12:00", "15:30", "17:30"],
-  4: [
-    "10:00",
-    "10:30",
-    "11:00",
-    "14:00",
-    "15:00",
-    "16:00",
-    "17:00",
-    "18:00",
-  ],
-  5: [
-    "10:00",
-    "11:00",
-    "11:30",
-    "14:00",
-    "15:00",
-    "16:00",
-    "17:00",
-    "19:00",
-  ],
-  6: ALL_SLOTS as unknown as readonly string[],
-};
-
-const DAY_SHORT = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"] as const;
-
-const MONTHS_TR = [
-  "Ocak",
-  "Şubat",
-  "Mart",
-  "Nisan",
-  "Mayıs",
-  "Haziran",
-  "Temmuz",
-  "Ağustos",
-  "Eylül",
-  "Ekim",
-  "Kasım",
-  "Aralık",
-] as const;
-
-const WHATSAPP_HREF = "https://wa.me/905555884256";
+import { ALL_SLOTS, BUSINESS, SERVICES, UNAVAILABLE_BY_WEEKDAY, WEEKLY_OCCUPANCY } from "@/lib/business";
+import {
+  dateToKey,
+  dayShortLabel,
+  formatDayMonth,
+  formatWeekRange,
+  toMondayIndex,
+  weekDates,
+} from "@/lib/dates";
 
 type WeekDay = {
-  index: number;
   date: Date;
   dayNum: number;
   short: string;
@@ -86,50 +22,24 @@ type WeekDay = {
   isToday: boolean;
 };
 
-function getWeekDays(weekOffset = 0): WeekDay[] {
+function buildWeek(weekOffset: number): WeekDay[] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const dayOfWeek = today.getDay();
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-
-  const monday = new Date(today);
-  monday.setDate(
-    today.getDate() + mondayOffset + weekOffset * 7
-  );
-
-  return Array.from({ length: 7 }, (_, i) => {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + i);
-
-    const weekdayIndex =
-      date.getDay() === 0 ? 6 : date.getDay() - 1;
-
+  return weekDates(weekOffset, today).map((date) => {
+    const weekdayIndex = toMondayIndex(date.getDay());
     return {
-      index: i,
       date,
       dayNum: date.getDate(),
-      short: DAY_SHORT[weekdayIndex],
-      occupancy: OCCUPANCY[weekdayIndex],
-      closed: CLOSED_DAYS.has(weekdayIndex),
+      short: dayShortLabel(date.getDay()),
+      occupancy: WEEKLY_OCCUPANCY[weekdayIndex],
+      closed: weekdayIndex === 6, // Pazar
       isToday: date.getTime() === today.getTime(),
     };
   });
 }
 
-function formatDate(date: Date) {
-  return `${date.getDate()} ${MONTHS_TR[date.getMonth()]}`;
-}
-
-function formatDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-function occupancyTone(occupancy: number, closed: boolean) {
+function occupancyTone(occupancy: number, closed: boolean): string {
   if (closed) return "text-zinc-600";
   if (occupancy < 45) return "text-emerald-400";
   if (occupancy < 75) return "text-amber-400";
@@ -139,15 +49,12 @@ function occupancyTone(occupancy: number, closed: boolean) {
 function Card({
   children,
   className = "",
-  id,
 }: {
   children: React.ReactNode;
   className?: string;
-  id?: string;
 }) {
   return (
     <div
-      id={id}
       className={`rounded-2xl border border-white/[0.06] bg-white/[0.03] shadow-[0_8px_32px_-12px_rgba(0,0,0,0.5)] ${className}`}
     >
       {children}
@@ -155,78 +62,42 @@ function Card({
   );
 }
 
-function StepDot({
-  active,
-  done,
-}: {
-  active: boolean;
-  done: boolean;
-}) {
+function StepDot({ active, done }: { active: boolean; done: boolean }) {
   return (
     <span
       className={`h-1.5 rounded-full transition-all duration-300 ${
-        done
-          ? "w-6 bg-[#C9A962]"
-          : active
-            ? "w-6 bg-[#C9A962]/60"
-            : "w-1.5 bg-white/10"
+        done ? "w-6 bg-[#C9A962]" : active ? "w-6 bg-[#C9A962]/60" : "w-1.5 bg-white/10"
       }`}
     />
   );
 }
 
-function DayCard({
-  day,
-  selected,
-  onSelect,
-}: {
-  day: WeekDay;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const disabled = day.closed;
-
+function DayCard({ day, selected, onSelect }: { day: WeekDay; selected: boolean; onSelect: () => void }) {
   return (
     <button
       type="button"
-      disabled={disabled}
+      disabled={day.closed}
       onClick={onSelect}
       className={`group relative flex flex-col items-center rounded-xl border px-2 py-3 transition-all duration-200 sm:px-3 sm:py-3.5 ${
-        disabled
+        day.closed
           ? "cursor-not-allowed border-white/[0.03] bg-white/[0.01] opacity-40"
           : selected
             ? "border-[#C9A962]/40 bg-[#C9A962]/10 shadow-[0_0_20px_-4px_rgba(201,169,98,0.25)]"
             : "border-white/[0.06] bg-white/[0.03] hover:border-[#C9A962]/20 hover:bg-white/[0.05] active:scale-[0.97]"
       }`}
     >
-      {day.isToday && !disabled && (
+      {day.isToday && !day.closed && (
         <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 rounded-full bg-[#C9A962] px-1.5 py-px text-[9px] font-semibold text-black">
           Bugün
         </span>
       )}
-
-      <span
-        className={`text-[11px] font-medium ${
-          selected ? "text-[#C9A962]" : "text-zinc-500"
-        }`}
-      >
+      <span className={`text-[11px] font-medium ${selected ? "text-[#C9A962]" : "text-zinc-500"}`}>
         {day.short}
       </span>
-
-      <span
-        className={`mt-1 text-lg font-semibold tabular-nums ${
-          selected ? "text-white" : "text-zinc-200"
-        }`}
-      >
+      <span className={`mt-1 text-lg font-semibold tabular-nums ${selected ? "text-white" : "text-zinc-200"}`}>
         {day.dayNum}
       </span>
-
-      <span
-        className={`mt-1 text-[10px] font-medium ${occupancyTone(
-          day.occupancy,
-          day.closed
-        )}`}
-      >
+      <span className={`mt-1 text-[10px] font-medium ${occupancyTone(day.occupancy, day.closed)}`}>
         {day.closed ? "Kapalı" : `%${day.occupancy}`}
       </span>
     </button>
@@ -236,12 +107,10 @@ function DayCard({
 function TimeSlotButton({
   time,
   available,
-  selected,
   onSelect,
 }: {
   time: string;
   available: boolean;
-  selected: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -252,9 +121,7 @@ function TimeSlotButton({
       className={`rounded-lg border px-3 py-2 text-[13px] font-medium tabular-nums transition-all duration-200 ${
         !available
           ? "cursor-not-allowed border-transparent bg-transparent text-zinc-700 line-through"
-          : selected
-            ? "border-[#C9A962]/50 bg-[#C9A962] text-black shadow-[0_0_16px_-2px_rgba(201,169,98,0.4)]"
-            : "border-white/[0.08] bg-white/[0.04] text-zinc-200 hover:border-[#C9A962]/30 hover:bg-[#C9A962]/10 hover:text-[#C9A962] active:scale-[0.97]"
+          : "border-white/[0.08] bg-white/[0.04] text-zinc-200 hover:border-[#C9A962]/30 hover:bg-[#C9A962]/10 hover:text-[#C9A962] active:scale-[0.97]"
       }`}
     >
       {time}
@@ -262,68 +129,55 @@ function TimeSlotButton({
   );
 }
 
-function BookingForm({
-  day,
-  time,
-  onBack,
-}: {
-  day: WeekDay;
-  time: string;
-  onBack: () => void;
-}) {
+function BookingForm({ day, time, onDone }: { day: WeekDay; time: string; onDone: () => void }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [service, setService] = useState<string>(SERVICES[0]);
-
   const [confirmed, setConfirmed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [whatsappUrl, setWhatsappUrl] = useState("");
 
-  const canSubmit =
-    name.trim().length >= 2 &&
-    phone.trim().length >= 10 &&
-    !saving;
+  const canSubmit = name.trim().length >= 2 && phone.trim().length >= 10 && !saving;
 
   async function handleConfirm(e: React.FormEvent) {
     e.preventDefault();
-
     if (!canSubmit) return;
 
     setSaving(true);
     setErrorMessage("");
 
     const result = await createAppointment({
-      date: formatDateKey(day.date),
+      date: dateToKey(day.date),
       time,
       name,
       phone,
       service,
     });
 
+    setSaving(false);
+
     if (!result.success) {
       setErrorMessage(result.message);
-      setSaving(false);
       return;
     }
 
     const message = encodeURIComponent(
-      `Merhaba Brothers Erkek Kuaförü,
-    
-    Randevu talebim:
-    
-    👤 Ad Soyad: ${name.trim()}
-    📅 Tarih: ${formatDate(day.date)}
-    🕐 Saat: ${time}
-    ✂️ Hizmet: ${service}
-    📱 Telefon: ${phone.trim()}
-    
-    Teşekkürler.`
+      [
+        `Merhaba ${BUSINESS.name},`,
+        "",
+        "Randevu talebim:",
+        `👤 Ad Soyad: ${name.trim()}`,
+        `📅 Tarih: ${formatDayMonth(day.date)}`,
+        `🕐 Saat: ${time}`,
+        `✂️ Hizmet: ${service}`,
+        `📱 Telefon: ${phone.trim()}`,
+        "",
+        "Teşekkürler.",
+      ].join("\n")
     );
-    
-    setWhatsappUrl(`${WHATSAPP_HREF}?text=${message}`);
-    
-    setSaving(false);
+
+    setWhatsappUrl(`${BUSINESS.whatsappHref}?text=${message}`);
     setConfirmed(true);
   }
 
@@ -333,17 +187,11 @@ function BookingForm({
         <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-2xl text-emerald-400">
           ✓
         </div>
-  
-        <h3 className="text-lg font-semibold text-white">
-          Randevunuz Kaydedildi
-        </h3>
-  
+        <h3 className="text-lg font-semibold text-white">Randevunuz Kaydedildi</h3>
         <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-500">
-          Randevu bilgileriniz başarıyla kaydedildi.
-          WhatsApp üzerinden berbere göndererek
-          randevu talebinizi iletebilirsiniz.
+          Randevu talebiniz alındı. Berber tarafından onaylandığında bilgilendirileceksiniz.
+          Dilerseniz WhatsApp üzerinden de talebinizi iletebilirsiniz.
         </p>
-  
         <a
           href={whatsappUrl}
           target="_blank"
@@ -351,12 +199,11 @@ function BookingForm({
           className="mt-6 flex w-full max-w-sm items-center justify-center gap-2 rounded-2xl bg-[#25D366] px-5 py-3.5 text-sm font-semibold text-white shadow-[0_4px_24px_-4px_rgba(37,211,102,0.35)] transition-all duration-200 hover:brightness-110 active:scale-[0.98]"
         >
           <span className="text-lg">☘</span>
-          WhatsApp'tan Gönder
+          WhatsApp&apos;tan Gönder
         </a>
-  
         <button
           type="button"
-          onClick={onBack}
+          onClick={onDone}
           className="mt-5 text-sm font-medium text-[#C9A962] transition-colors hover:text-[#E8D5A3]"
         >
           Yeni randevu al
@@ -364,26 +211,19 @@ function BookingForm({
       </div>
     );
   }
-      
+
   return (
     <form onSubmit={handleConfirm} className="animate-slide-in space-y-4">
       <div className="mb-1 flex items-center justify-between">
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-600">
-            Randevu Detayı
-          </p>
-
+          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-600">Randevu Detayı</p>
           <p className="mt-1 text-sm text-zinc-400">
-            {formatDate(day.date)} ·{" "}
-            <span className="font-medium text-[#C9A962]">
-              {time}
-            </span>
+            {formatDayMonth(day.date)} · <span className="font-medium text-[#C9A962]">{time}</span>
           </p>
         </div>
-
         <button
           type="button"
-          onClick={onBack}
+          onClick={onDone}
           className="text-[13px] font-medium text-zinc-500 transition-colors hover:text-zinc-300"
         >
           ← Geri
@@ -391,13 +231,9 @@ function BookingForm({
       </div>
 
       <div>
-        <label
-          htmlFor="booking-name"
-          className="mb-1.5 block text-[13px] font-medium text-zinc-400"
-        >
+        <label htmlFor="booking-name" className="mb-1.5 block text-[13px] font-medium text-zinc-400">
           Ad Soyad
         </label>
-
         <input
           id="booking-name"
           type="text"
@@ -409,13 +245,9 @@ function BookingForm({
       </div>
 
       <div>
-        <label
-          htmlFor="booking-phone"
-          className="mb-1.5 block text-[13px] font-medium text-zinc-400"
-        >
+        <label htmlFor="booking-phone" className="mb-1.5 block text-[13px] font-medium text-zinc-400">
           Telefon
         </label>
-
         <input
           id="booking-phone"
           type="tel"
@@ -427,13 +259,9 @@ function BookingForm({
       </div>
 
       <div>
-        <label
-          htmlFor="booking-service"
-          className="mb-1.5 block text-[13px] font-medium text-zinc-400"
-        >
+        <label htmlFor="booking-service" className="mb-1.5 block text-[13px] font-medium text-zinc-400">
           Hizmet
         </label>
-
         <select
           id="booking-service"
           value={service}
@@ -467,117 +295,41 @@ function BookingForm({
 
 export default function AppointmentBooking() {
   const [weekOffset, setWeekOffset] = useState(0);
+  const weekDays = useMemo(() => buildWeek(weekOffset), [weekOffset]);
 
-  const weekDays = useMemo(
-    () => getWeekDays(weekOffset),
-    [weekOffset]
-  );
-
-  const [selectedDayIndex, setSelectedDayIndex] =
-    useState<number | null>(null);
-
-  const [selectedTime, setSelectedTime] =
-    useState<string | null>(null);
-
+  const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
 
-  const [bookedTimes, setBookedTimes] = useState<string[]>([]);
-  const [loadingBookedTimes, setLoadingBookedTimes] = useState(false);
+  const selectedDay = selectedDayIndex !== null ? weekDays[selectedDayIndex] : null;
 
-  const selectedDay =
-    selectedDayIndex !== null
-      ? weekDays[selectedDayIndex]
-      : null;
-
-  useEffect(() => {
-    if (!selectedDay || selectedDay.closed) {
-      setBookedTimes([]);
-      setLoadingBookedTimes(false);
-      return;
-    }
-
-    setLoadingBookedTimes(true);
-
-    const dateKey = formatDateKey(selectedDay.date);
-    const appointmentsQuery = query(
-      collection(db, "appointments"),
-      where("date", "==", dateKey)
-    );
-
-    const unsubscribe = onSnapshot(
-      appointmentsQuery,
-      (snapshot) => {
-        const times = snapshot.docs
-          .map((appointment) => appointment.data())
-          .filter((data) => data.status !== "cancelled")
-          .map((data) => data.time as string);
-
-        setBookedTimes(times);
-        setLoadingBookedTimes(false);
-      },
-      (error) => {
-        console.error("Randevu durumu dinlenemedi:", error);
-        setBookedTimes([]);
-        setLoadingBookedTimes(false);
-      }
-    );
-
-    return () => unsubscribe();
+  // Not: dolu saatler istemci tarafında Firestore'dan okunmuyor — appointments
+  // koleksiyonu sadece admin'e açık (bkz. firestore.rules). Burada sadece
+  // önceden belirlenmiş kapalı saatler gösterilir; gerçek çakışma kontrolü
+  // randevu kaydı sırasında appointmentService.createAppointment() içindeki
+  // transaction ile yapılır ve çakışma varsa BookingForm'da hata gösterilir.
+  const slots = useMemo(() => {
+    if (!selectedDay) return [];
+    const weekdayIndex = toMondayIndex(selectedDay.date.getDay());
+    const unavailable = new Set(UNAVAILABLE_BY_WEEKDAY[weekdayIndex] ?? []);
+    return ALL_SLOTS.map((time) => ({ time, available: !unavailable.has(time) }));
   }, [selectedDay]);
 
-  const slots = useMemo(() => {
-    if (selectedDayIndex === null || !selectedDay) {
-      return [];
-    }
-
-    const weekdayIndex =
-      selectedDay.date.getDay() === 0
-        ? 6
-        : selectedDay.date.getDay() - 1;
-
-    const unavailable = new Set(
-      UNAVAILABLE_BY_DAY[weekdayIndex] ?? []
-    );
-
-    return ALL_SLOTS.map((time) => ({
-      time,
-      available:
-        !unavailable.has(time) &&
-        !bookedTimes.includes(time),
-    }));
-  }, [selectedDayIndex, selectedDay, bookedTimes]);
-
-  const step =
-    selectedTime && selectedDay
-      ? 3
-      : selectedDay
-        ? 2
-        : 1;
+  const step = selectedTime && selectedDay ? 3 : selectedDay ? 2 : 1;
 
   function selectDay(index: number) {
     if (weekDays[index]?.closed) return;
-
     setSelectedDayIndex(index);
     setSelectedTime(null);
-    setBookedTimes([]);
   }
 
   function changeWeek(direction: number) {
-    setWeekOffset((current) => {
-      const next = current + direction;
-      return Math.max(0, next);
-    });
-
+    setWeekOffset((current) => Math.max(0, current + direction));
     setSelectedDayIndex(null);
     setSelectedTime(null);
-    setBookedTimes([]);
   }
 
-  function selectTime(time: string) {
-    setSelectedTime(time);
-  }
-
-  function resetForm() {
+  function resetToTimeSelection() {
     setSelectedTime(null);
     setFormKey((k) => k + 1);
   }
@@ -585,7 +337,6 @@ export default function AppointmentBooking() {
   function resetAll() {
     setSelectedDayIndex(null);
     setSelectedTime(null);
-    setBookedTimes([]);
     setFormKey((k) => k + 1);
   }
 
@@ -593,43 +344,21 @@ export default function AppointmentBooking() {
     <>
       <style>{`
         @keyframes slide-in {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
         }
-
-        .animate-slide-in {
-          animation: slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-
+        .animate-slide-in { animation: slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
         @media (prefers-reduced-motion: reduce) {
-          .animate-slide-in {
-            animation: none;
-          }
+          .animate-slide-in { animation: none; }
         }
       `}</style>
 
-      <Card
-        id="booking"
-        className="flex h-full flex-col p-4 sm:p-5 lg:p-6"
-      >
+      <Card className="flex h-full flex-col p-4 sm:p-5 lg:p-6">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-600">
-              Randevu
-            </p>
-
-            <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-white">
-              Randevu Al
-            </h2>
+            <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-600">Randevu</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-white">Randevu Al</h2>
           </div>
-
           <div className="flex items-center gap-1.5">
             <StepDot active={step === 1} done={step > 1} />
             <StepDot active={step === 2} done={step > 2} />
@@ -638,14 +367,9 @@ export default function AppointmentBooking() {
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row-reverse lg:gap-5">
-
-          {/* Calendar */}
           <div className="lg:w-[42%] lg:shrink-0">
             <div className="mb-2.5 flex items-center justify-between">
-              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-600">
-                Gün Seçin
-              </p>
-
+              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-600">Gün Seçin</p>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
@@ -656,13 +380,9 @@ export default function AppointmentBooking() {
                 >
                   ‹
                 </button>
-
                 <span className="min-w-[72px] text-center text-[10px] font-medium text-zinc-600">
-                  {weekOffset === 0
-                    ? "Bu hafta"
-                    : `${weekOffset}. hafta`}
+                  {weekOffset === 0 ? "Bu hafta" : `${weekOffset}. hafta`}
                 </span>
-
                 <button
                   type="button"
                   onClick={() => changeWeek(1)}
@@ -675,12 +395,12 @@ export default function AppointmentBooking() {
             </div>
 
             <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-              {weekDays.map((day) => (
+              {weekDays.map((day, index) => (
                 <DayCard
-                  key={day.index}
+                  key={day.date.toISOString()}
                   day={day}
-                  selected={selectedDayIndex === day.index}
-                  onSelect={() => selectDay(day.index)}
+                  selected={selectedDayIndex === index}
+                  onSelect={() => selectDay(index)}
                 />
               ))}
             </div>
@@ -689,17 +409,10 @@ export default function AppointmentBooking() {
               <p className="animate-slide-in mt-3 text-[13px] text-zinc-500">
                 Seçili:{" "}
                 <span className="font-medium text-zinc-300">
-                  {selectedDay.short},{" "}
-                  {formatDate(selectedDay.date)}
+                  {selectedDay.short}, {formatDayMonth(selectedDay.date)}
                 </span>
-
                 {!selectedDay.closed && (
-                  <span
-                    className={`ml-1.5 ${occupancyTone(
-                      selectedDay.occupancy,
-                      false
-                    )}`}
-                  >
+                  <span className={`ml-1.5 ${occupancyTone(selectedDay.occupancy, false)}`}>
                     · %{selectedDay.occupancy} dolu
                   </span>
                 )}
@@ -707,15 +420,10 @@ export default function AppointmentBooking() {
             )}
           </div>
 
-          {/* Times / Form */}
           <div className="flex min-h-0 flex-1 flex-col lg:border-r lg:border-white/[0.06] lg:pr-5">
-
             {!selectedDay && (
               <div className="animate-slide-in flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.06] bg-white/[0.01] px-4 py-10 text-center">
-                <p className="text-sm font-medium text-zinc-400">
-                  Bir gün seçin
-                </p>
-
+                <p className="text-sm font-medium text-zinc-400">Bir gün seçin</p>
                 <p className="mt-1 text-[13px] text-zinc-600">
                   Müsait saatleri görmek için takvimden bir gün seçin.
                 </p>
@@ -727,46 +435,25 @@ export default function AppointmentBooking() {
                 <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-600">
                   Saat Seçin
                 </p>
-
-                {loadingBookedTimes ? (
-                  <div className="flex flex-1 items-center justify-center py-10 text-sm text-zinc-600">
-                    Müsait saatler kontrol ediliyor...
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                      {slots.map(({ time, available }) => (
-                        <TimeSlotButton
-                          key={time}
-                          time={time}
-                          available={available}
-                          selected={false}
-                          onSelect={() => selectTime(time)}
-                        />
-                      ))}
-                    </div>
-
-                    <p className="mt-3 text-[11px] text-zinc-600">
-                      <span className="inline-block h-2 w-2 rounded-full bg-[#C9A962] align-middle" />{" "}
-                      Müsait saatler ·{" "}
-                      <span className="text-zinc-700 line-through">
-                        Dolu
-                      </span>
-                    </p>
-                  </>
-                )}
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {slots.map(({ time, available }) => (
+                    <TimeSlotButton
+                      key={time}
+                      time={time}
+                      available={available}
+                      onSelect={() => setSelectedTime(time)}
+                    />
+                  ))}
+                </div>
+                <p className="mt-3 text-[11px] text-zinc-600">
+                  <span className="inline-block h-2 w-2 rounded-full bg-[#C9A962] align-middle" /> Müsait
+                  saatler · <span className="text-zinc-700 line-through">Kapalı</span>
+                </p>
               </div>
             )}
 
             {selectedDay && selectedTime && (
-              <BookingForm
-                key={formKey}
-                day={selectedDay}
-                time={selectedTime}
-                onBack={() => {
-                  resetForm();
-                }}
-              />
+              <BookingForm key={formKey} day={selectedDay} time={selectedTime} onDone={resetToTimeSelection} />
             )}
           </div>
         </div>

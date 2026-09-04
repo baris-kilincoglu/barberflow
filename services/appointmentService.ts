@@ -1,88 +1,72 @@
 import {
   collection,
   doc,
-  getDocs,
+  onSnapshot,
   runTransaction,
   serverTimestamp,
+  updateDoc,
+  type Unsubscribe,
 } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
+import type {
+  Appointment,
+  AppointmentStatus,
+  CreateAppointmentResult,
+  NewAppointmentInput,
+} from "@/lib/types";
 
-export type AppointmentData = {
-  date: string;
-  time: string;
-  name: string;
-  phone: string;
-  service: string;
-};
+const COLLECTION = "appointments";
 
-export async function getBookedTimes(date: string): Promise<string[]> {
-  try {
-    const appointmentsRef = collection(db, "appointments");
-    const snapshot = await getDocs(appointmentsRef);
-
-    return snapshot.docs
-      .map((doc) => doc.data())
-      .filter((data) => data.date === date && data.status !== "cancelled")
-      .map((data) => data.time as string);
-  } catch (error) {
-    console.error("Randevular alınamadı:", error);
-    return [];
-  }
+function slotId(date: string, time: string): string {
+  return `${date}_${time.replace(/:/g, "-")}`;
 }
 
-export async function createAppointment(
-  appointment: AppointmentData
-): Promise<{ success: true } | { success: false; message: string }> {
-  const { date, time, name, phone, service } = appointment;
+function isValidInput(input: NewAppointmentInput): string | null {
+  if (!input.date || !input.time) return "Lütfen tarih ve saat seçin.";
+  if (input.name.trim().length < 2) return "Lütfen adınızı girin.";
+  if (input.phone.trim().length < 10) return "Lütfen geçerli bir telefon numarası girin.";
+  if (!input.service.trim()) return "Lütfen bir hizmet seçin.";
+  return null;
+}
 
-  if (
-    !date ||
-    !time ||
-    !name.trim() ||
-    !phone.trim() ||
-    !service.trim()
-  ) {
-    return {
-      success: false,
-      message: "Lütfen tüm bilgileri doldurun.",
-    };
+/**
+ * Yeni randevu oluşturur. Aynı tarih+saat için bir kayıt zaten varsa
+ * (transaction ile atomik kontrol edilir) hata döner — böylece iki müşteri
+ * aynı anda aynı saati alamaz. Randevu her zaman "pending" (onay bekliyor)
+ * olarak başlar; admin panelden onaylanması/reddedilmesi gerekir.
+ */
+export async function createAppointment(
+  input: NewAppointmentInput
+): Promise<CreateAppointmentResult> {
+  const validationError = isValidInput(input);
+  if (validationError) {
+    return { success: false, message: validationError };
   }
 
-  const appointmentId = `${date}_${time.replace(/:/g, "-")}`;
-
-  const appointmentRef = doc(
-    collection(db, "appointments"),
-    appointmentId
-  );
+  const ref = doc(collection(db, COLLECTION), slotId(input.date, input.time));
 
   try {
     await runTransaction(db, async (transaction) => {
-      const existingAppointment = await transaction.get(appointmentRef);
-
-      if (existingAppointment.exists()) {
+      const existing = await transaction.get(ref);
+      if (existing.exists()) {
         throw new Error("SLOT_ALREADY_BOOKED");
       }
 
-      transaction.set(appointmentRef, {
-        date,
-        time,
-        name: name.trim(),
-        phone: phone.trim(),
-        service: service.trim(),
-        status: "confirmed",
+      transaction.set(ref, {
+        date: input.date,
+        time: input.time,
+        name: input.name.trim(),
+        phone: input.phone.trim(),
+        service: input.service.trim(),
+        status: "pending",
         createdAt: serverTimestamp(),
       });
     });
 
-    return {
-      success: true,
-    };
+    return { success: true };
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === "SLOT_ALREADY_BOOKED"
-    ) {
+    if (error instanceof Error && error.message === "SLOT_ALREADY_BOOKED") {
       return {
         success: false,
         message: "Bu saat az önce başka bir müşteri tarafından alındı.",
@@ -90,10 +74,41 @@ export async function createAppointment(
     }
 
     console.error("Randevu oluşturulamadı:", error);
-
     return {
       success: false,
-      message: "Randevu oluşturulurken bir hata oluştu.",
+      message: "Randevu oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
     };
   }
+}
+
+/**
+ * Tüm randevuları gerçek zamanlı dinler. Sadece giriş yapmış admin
+ * çağırabilir — Firestore kuralları bunu zaten zorunlu kılar, ama bu
+ * fonksiyon da sadece admin panelinden kullanılmalıdır.
+ */
+export function subscribeToAppointments(
+  onData: (appointments: Appointment[]) => void,
+  onError: (error: unknown) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(db, COLLECTION),
+    (snapshot) => {
+      const appointments = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Omit<Appointment, "id">),
+      }));
+      onData(appointments);
+    },
+    onError
+  );
+}
+
+export async function updateAppointmentStatus(
+  appointmentId: string,
+  status: AppointmentStatus
+): Promise<void> {
+  await updateDoc(doc(db, COLLECTION, appointmentId), {
+    status,
+    updatedAt: serverTimestamp(),
+  });
 }
