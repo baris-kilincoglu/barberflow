@@ -3,9 +3,15 @@ import {
   setDoc,
   getDoc,
   updateDoc,
-  where
+  where,
+  collection,
+  runTransaction,
+  serverTimestamp,
+  onSnapshot,
+  query,
+  getDocs
 } from "firebase/firestore";
-import type { Unsubscribe } from "firebase/firestore"; // Tip importunu ayrı yazın
+import type { Unsubscribe } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
 
