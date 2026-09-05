@@ -1,19 +1,15 @@
 import {
-  collection,
   doc,
-  getDocs,
-  onSnapshot,
-  query,
-  runTransaction,
-  serverTimestamp,
+  setDoc,
+  getDoc,
   updateDoc,
-  where,
-  type Unsubscribe,
+  where
 } from "firebase/firestore";
+import type { Unsubscribe } from "firebase/firestore"; // Tip importunu ayrı yazın
 
 import { db } from "@/lib/firebase";
+
 import type {
-  setDoc,
   Appointment,
   AppointmentStatus,
   CreateAppointmentResult,
