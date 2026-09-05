@@ -1,20 +1,14 @@
 import {
-  doc,
-  setDoc,
-  getDoc,
-  updateDoc,
-  where,
   collection,
+  doc,
+  onSnapshot,
   runTransaction,
   serverTimestamp,
-  onSnapshot,
-  query,
-  getDocs
+  updateDoc,
+  type Unsubscribe,
 } from "firebase/firestore";
-import type { Unsubscribe } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
-
 import type {
   Appointment,
   AppointmentStatus,
@@ -30,6 +24,11 @@ function slotId(date: string, time: string): string {
 
 function isValidInput(input: NewAppointmentInput): string | null {
   if (!input.date || !input.time) return "Lütfen tarih ve saat seçin.";
+
+  // Admin'in bir saati manuel "kapalı" olarak işaretlemesi durumunda isim/telefon
+  // zorunlu değildir — bu, müşteri randevusu değil, berberin kendi engellemesidir.
+  if (input.status === "blocked") return null;
+
   if (input.name.trim().length < 2) return "Lütfen adınızı girin.";
   if (input.phone.trim().length < 10) return "Lütfen geçerli bir telefon numarası girin.";
   if (!input.service.trim()) return "Lütfen bir hizmet seçin.";
@@ -37,10 +36,13 @@ function isValidInput(input: NewAppointmentInput): string | null {
 }
 
 /**
- * Yeni randevu oluşturur. Aynı tarih+saat için bir kayıt zaten varsa
- * (transaction ile atomik kontrol edilir) hata döner — böylece iki müşteri
- * aynı anda aynı saati alamaz. Randevu her zaman "pending" (onay bekliyor)
- * olarak başlar; admin panelden onaylanması/reddedilmesi gerekir.
+ * Yeni randevu (veya admin tarafından manuel saat kapatma) oluşturur. Aynı
+ * tarih+saat için bir kayıt zaten varsa (transaction ile atomik kontrol
+ * edilir) hata döner — böylece iki müşteri aynı anda aynı saati alamaz.
+ * Müşteri tarafından oluşturulan randevular her zaman "pending" (onay
+ * bekliyor) olarak başlar; admin panelden onaylanması/reddedilmesi gerekir.
+ * `status: "blocked"` sadece admin panelinden, giriş yapmış kullanıcı
+ * tarafından gönderilir (bkz. firestore.rules).
  */
 export async function createAppointment(
   input: NewAppointmentInput
@@ -65,7 +67,7 @@ export async function createAppointment(
         name: input.name.trim(),
         phone: input.phone.trim(),
         service: input.service.trim(),
-        status: "pending",
+        status: input.status ?? "pending",
         createdAt: serverTimestamp(),
       });
     });
@@ -109,69 +111,12 @@ export function subscribeToAppointments(
   );
 }
 
-/**
- * Belirli bir berber ve tarih için rezerve edilmiş saatleri getirir.
- */
-export async function getBookedTimes(barberId: string, date: string) {
-  try {
-    const q = query(
-      collection(db, COLLECTION),
-      where("date", "==", date),
-      // "confirmed", "pending" ve "blocked" olan tüm saatleri dolu kabul et
-      where("status", "in", ["confirmed", "pending", "blocked"])
-    );
-    
-    const snapshot = await getDocs(q);
-    const bookedTimes = snapshot.docs.map((doc) => doc.data().time);
-    
-    return bookedTimes;
-  } catch (error) {
-    console.error("Error fetching booked times:", error);
-    return [];
-  }
-}
-
-/**
- * Admin paneli (Dashboard.tsx) üzerinden randevu durumunu güncellemeye yarar.
- */
 export async function updateAppointmentStatus(
   appointmentId: string,
   status: AppointmentStatus
-): Promise<{ success: boolean; message?: string }> {
-  try {
-    const ref = doc(db, COLLECTION, appointmentId);
-    await updateDoc(ref, {
-      status: status,
-      updatedAt: serverTimestamp(),
-    });
-    return { success: true };
-  } catch (error) {
-    console.error("Randevu durumu güncellenirken hata oluştu:", error);
-    return {
-      success: false,
-      message: "Durum güncellenemedi.",
-    };
-  }
+): Promise<void> {
+  await updateDoc(doc(db, COLLECTION, appointmentId), {
+    status,
+    updatedAt: serverTimestamp(),
+  });
 }
-/**
- * Adminin istediği tarih ve saati manuel olarak randevulara kapatmasını sağlar.
- */
-export async function blockTimeSlot(date: string, time: string, reason: string = "Dolu / Kapalı") {
-  const ref = doc(collection(db, COLLECTION), slotId(date, time));
-
-  try {
-    await setDoc(ref, {
-      date,
-      time,
-      name: "SİSTEM / ADMİN",
-      phone: "-",
-      service: reason,
-      status: "blocked", // Müşterilere kapalı olduğunu belirten durum
-      createdAt: serverTimestamp(),
-    });
-    return { success: true };
-  } catch (error) {
-    console.error("Saat kapatılırken hata oluştu:", error);
-    return { success: false, message: "Saat kapatılamadı." };
-  }
-} 

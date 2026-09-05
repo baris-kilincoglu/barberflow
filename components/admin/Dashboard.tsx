@@ -1,5 +1,5 @@
 "use client";
-import AdminBlockSlot from "./AdminBlockSlot";
+
 import { useEffect, useMemo, useState } from "react";
 import { signOut, type User } from "firebase/auth";
 
@@ -8,6 +8,7 @@ import type { Appointment, AppointmentStatus } from "@/lib/types";
 import {
   subscribeToAppointments,
   updateAppointmentStatus,
+  createAppointment,
 } from "@/services/appointmentService";
 import {
   dateToKey,
@@ -19,12 +20,20 @@ import {
 } from "@/lib/dates";
 import { BUSINESS } from "@/lib/business";
 
+// 30 dakikalık zaman aralıkları
+const WORKING_HOURS = [
+  "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+  "12:00", "12:30", "13:00", "13:30", "14:00", "14:30",
+  "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00",
+];
+
 function getStatusLabel(status: AppointmentStatus): string {
   switch (status) {
     case "confirmed": return "Onaylandı";
     case "rejected": return "Reddedildi";
     case "cancelled": return "İptal";
     case "completed": return "Tamamlandı";
+    case "blocked": return "Kapalı";
     case "pending":
     default:
       return "Onay Bekliyor";
@@ -37,6 +46,7 @@ function getStatusClasses(status: AppointmentStatus): string {
     case "rejected": return "bg-red-500/10 text-red-300 border-red-500/20";
     case "cancelled": return "bg-zinc-500/10 text-zinc-400 border-zinc-500/20";
     case "completed": return "bg-blue-500/10 text-blue-300 border-blue-500/20";
+    case "blocked": return "bg-purple-500/10 text-purple-300 border-purple-500/20";
     case "pending":
     default:
       return "bg-amber-500/10 text-amber-300 border-amber-500/20";
@@ -46,6 +56,7 @@ function getStatusClasses(status: AppointmentStatus): string {
 function getStatusIcon(status: AppointmentStatus): string {
   if (status === "confirmed") return "🟢";
   if (status === "rejected") return "🔴";
+  if (status === "blocked") return "🔒";
   return "🟡";
 }
 
@@ -81,6 +92,9 @@ export default function Dashboard({ user }: { user: User }) {
   const [actionId, setActionId] = useState("");
   const [mobileFilter, setMobileFilter] = useState<"all" | "pending">("all");
 
+  // Saat Durumu Değiştirme Modalı
+  const [selectedTimeForModal, setSelectedTimeForModal] = useState<string | null>(null);
+
   const [weekOffset, setWeekOffset] = useState(0);
   const dates = useMemo(() => weekDates(weekOffset).map(dateToKey), [weekOffset]);
 
@@ -90,6 +104,7 @@ export default function Dashboard({ user }: { user: User }) {
 
     return subscribeToAppointments(
       (all) => {
+        // İptal edilen randevu/engelleri aktif listeden hariç tutuyoruz
         const active = all
           .filter((a) => a.status !== "cancelled")
           .sort((a, b) => (a.date !== b.date ? a.date.localeCompare(b.date) : a.time.localeCompare(b.time)));
@@ -131,6 +146,46 @@ export default function Dashboard({ user }: { user: User }) {
     });
     return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
   }, [selectedDayAppointments]);
+
+  // Modal Seçimine Göre Saati Aç / Kapat
+  async function applySlotStatus(statusChoice: "OPEN" | "BLOCKED") {
+    if (!selectedTimeForModal) return;
+
+    const time = selectedTimeForModal;
+    const existing = selectedDayAppointments.find((a) => a.time === time);
+    setSelectedTimeForModal(null);
+    setActionId(time);
+    setError("");
+
+    try {
+      if (statusChoice === "OPEN") {
+        // Eğer o saatte mevcut bir engel veya randevu varsa durumunu 'cancelled' yapıyoruz
+        if (existing) {
+          await updateAppointmentStatus(existing.id, "cancelled");
+        }
+      } else {
+        // Kapat seçildiyse: zaten kayıt varsa 'blocked' yapıyoruz, yoksa yeni 'blocked' kaydı açıyoruz
+        if (existing) {
+          if (existing.status !== "blocked") {
+            await updateAppointmentStatus(existing.id, "blocked");
+          }
+        } else {
+          await createAppointment({
+            date: selectedDate,
+            time,
+            name: "Yönetici Engeli",
+            phone: "",
+            service: "Manuel Kapatıldı",
+            status: "blocked",
+          });
+        }
+      }
+    } catch {
+      setError("Saat durumu güncellenirken bir hata oluştu.");
+    } finally {
+      setActionId("");
+    }
+  }
 
   async function handleStatusChange(appointment: Appointment, status: AppointmentStatus) {
     const actionText = status === "confirmed" ? "onaylamak" : status === "rejected" ? "reddetmek" : "iptal etmek";
@@ -188,6 +243,97 @@ export default function Dashboard({ user }: { user: User }) {
           </div>
         </section>
 
+        {/* Saat Seçip Kapatma/Açma Gridi (30'ar Dakikalık) */}
+        <section className="mt-6 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4 sm:p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Saat Yönetimi / Manuel Kapatma</h2>
+              <p className="mt-0.5 text-xs text-zinc-500">
+                {formatLongDate(selectedDate)} tarihi için saatin üzerine tıklayarak AÇIK / KAPALI durumunu seçebilirsiniz.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10">
+            {WORKING_HOURS.map((time) => {
+              const app = selectedDayAppointments.find((a) => a.time === time);
+              const isBlocked = app?.status === "blocked";
+              const isConfirmed = app?.status === "confirmed";
+              const isPending = app?.status === "pending";
+
+              let slotStyle =
+                "border-white/[0.08] bg-white/[0.02] text-zinc-300 hover:border-[#C9A962]/50 hover:bg-white/[0.06]";
+              let label = "Açık";
+
+              if (isBlocked) {
+                slotStyle = "border-purple-500/40 bg-purple-500/20 text-purple-200 hover:bg-purple-500/30";
+                label = "🔒 Kapalı";
+              } else if (isConfirmed) {
+                slotStyle = "border-green-500/30 bg-green-500/10 text-green-300 hover:border-green-500/50";
+                label = "Dolu";
+              } else if (isPending) {
+                slotStyle = "border-amber-500/30 bg-amber-500/10 text-amber-300 hover:border-amber-500/50";
+                label = "Bekliyor";
+              }
+
+              return (
+                <button
+                  key={time}
+                  type="button"
+                  disabled={actionId === time || actionId === app?.id}
+                  onClick={() => setSelectedTimeForModal(time)}
+                  className={`flex flex-col items-center justify-center rounded-xl border p-2.5 transition ${slotStyle}`}
+                >
+                  <span className="text-xs font-bold">{time}</span>
+                  <span className="mt-1 text-[10px]">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Saat Durumu Seçim Modalı (Açılır Pencere) */}
+        {selectedTimeForModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#121212] p-6 shadow-2xl">
+              <h3 className="text-lg font-semibold text-white">Saat Durumu Ayarla</h3>
+              <p className="mt-1 text-sm text-zinc-400">
+                <span className="font-semibold text-[#C9A962]">{formatLongDate(selectedDate)}</span> saat{" "}
+                <span className="font-semibold text-white">{selectedTimeForModal}</span> için durum seçiniz:
+              </p>
+
+              <div className="mt-6 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => applySlotStatus("OPEN")}
+                  className="flex w-full items-center justify-between rounded-xl border border-green-500/30 bg-green-500/10 p-3.5 text-left text-sm font-semibold text-green-300 transition hover:bg-green-500/20"
+                >
+                  <span>Randevu Alımına AÇIK</span>
+                  <span>🔓</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applySlotStatus("BLOCKED")}
+                  className="flex w-full items-center justify-between rounded-xl border border-purple-500/30 bg-purple-500/10 p-3.5 text-left text-sm font-semibold text-purple-300 transition hover:bg-purple-500/20"
+                >
+                  <span>Randevu Alımına KAPALI</span>
+                  <span>🔒</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedTimeForModal(null)}
+                className="mt-4 w-full rounded-xl border border-white/10 py-2.5 text-xs text-zinc-400 transition hover:bg-white/5 hover:text-white"
+              >
+                Vazgeç
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Haftalık Takvim */}
         <section className="mt-6 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4 sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -288,6 +434,7 @@ export default function Dashboard({ user }: { user: User }) {
           </div>
         </section>
 
+        {/* Randevular Listesi */}
         <section className="mt-6 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-4 sm:p-6">
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -413,6 +560,16 @@ export default function Dashboard({ user }: { user: User }) {
                         className="col-span-2 h-11 rounded-xl border border-red-500/20 bg-red-500/5 px-4 text-sm font-medium text-red-300 transition hover:bg-red-500/10 disabled:opacity-50 sm:col-span-1"
                       >
                         {actionId === a.id ? "İptal ediliyor..." : "🔴 İptal Et"}
+                      </button>
+                    )}
+
+                    {a.status === "blocked" && (
+                      <button
+                        disabled={actionId === a.id}
+                        onClick={() => handleStatusChange(a, "cancelled")}
+                        className="col-span-2 h-11 rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 text-sm font-medium text-purple-300 transition hover:bg-purple-500/20 disabled:opacity-50 sm:col-span-1"
+                      >
+                        {actionId === a.id ? "İşleniyor..." : "🔓 Engeli Kaldır"}
                       </button>
                     )}
                   </div>

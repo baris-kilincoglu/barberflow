@@ -5,7 +5,8 @@ export type AppointmentStatus =
   | "confirmed"
   | "rejected"
   | "cancelled"
-  | "completed";
+  | "completed"
+  | "blocked";
 
 export type Appointment = {
   id: string;
@@ -24,6 +25,9 @@ export type NewAppointmentInput = {
   name: string;
   phone: string;
   service: string;
+  // Sadece admin panelinden bir saati manuel kapatmak için kullanılır.
+  // Belirtilmezse "pending" olarak kaydedilir (normal müşteri randevusu).
+  status?: AppointmentStatus;
 };
 
 export type CreateAppointmentResult =
