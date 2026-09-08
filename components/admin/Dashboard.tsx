@@ -7,8 +7,10 @@ import { auth } from "@/lib/firebase";
 import type { Appointment, AppointmentStatus } from "@/lib/types";
 import {
   subscribeToAppointments,
+  subscribeToSlotStatus,
   updateAppointmentStatus,
   createAppointment,
+  setSlotOverrideOpen,
 } from "@/services/appointmentService";
 import {
   dateToKey,
@@ -18,14 +20,7 @@ import {
   toMondayIndex,
   weekDates,
 } from "@/lib/dates";
-import { BUSINESS } from "@/lib/business";
-
-// 30 dakikalık zaman aralıkları
-const WORKING_HOURS = [
-  "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
-  "12:00", "12:30", "13:00", "13:30", "14:00", "14:30",
-  "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00",
-];
+import { ALL_SLOTS, BUSINESS, UNAVAILABLE_BY_WEEKDAY } from "@/lib/business";
 
 function getStatusLabel(status: AppointmentStatus): string {
   switch (status) {
@@ -118,6 +113,18 @@ export default function Dashboard({ user }: { user: User }) {
     );
   }, []);
 
+  // slotStatus'taki override'ları (statik kapanışı geçersiz kılan "açık"
+  // işaretleri) dinler — bkz. services/appointmentService.ts.
+  const [slotStatusMap, setSlotStatusMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    return subscribeToSlotStatus(
+      selectedDate,
+      setSlotStatusMap,
+      () => setSlotStatusMap({})
+    );
+  }, [selectedDate]);
+
   const weekAppointments = useMemo(
     () => appointments.filter((a) => dates.includes(a.date)),
     [appointments, dates]
@@ -163,6 +170,12 @@ export default function Dashboard({ user }: { user: User }) {
         if (existing) {
           await updateAppointmentStatus(existing.id, "cancelled");
         }
+
+        // Statik haftalık programda bu saat zaten kapalıysa, sadece bu
+        // tarih için "açık" olarak işaretleyip statik kuralı geçersiz kılıyoruz.
+        if (staticallyClosedTimes.has(time)) {
+          await setSlotOverrideOpen(selectedDate, time);
+        }
       } else {
         // Kapat seçildiyse: zaten kayıt varsa 'blocked' yapıyoruz, yoksa yeni 'blocked' kaydı açıyoruz
         if (existing) {
@@ -206,6 +219,14 @@ export default function Dashboard({ user }: { user: User }) {
   }
 
   const isToday = selectedDate === todayKey();
+
+  // lib/business.ts içindeki UNAVAILABLE_BY_WEEKDAY, randevu sayfasının da
+  // kullandığı aynı sabit haftalık kapanış listesidir — böylece iki taraf
+  // aynı kaynaktan beslenir ve senkron kalır.
+  const staticallyClosedTimes = useMemo(() => {
+    const weekdayIndex = toMondayIndex(new Date(`${selectedDate}T12:00:00`).getDay());
+    return new Set(UNAVAILABLE_BY_WEEKDAY[weekdayIndex] ?? []);
+  }, [selectedDate]);
 
   return (
     <main className="min-h-dvh bg-[#050505] px-4 py-5 text-white sm:px-6 lg:px-8">
@@ -255,8 +276,10 @@ export default function Dashboard({ user }: { user: User }) {
           </div>
 
           <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10">
-            {WORKING_HOURS.map((time) => {
+            {ALL_SLOTS.map((time) => {
               const app = selectedDayAppointments.find((a) => a.time === time);
+              const isOverriddenOpen = slotStatusMap[time] === false;
+              const isStaticallyClosed = staticallyClosedTimes.has(time) && !isOverriddenOpen;
               const isBlocked = app?.status === "blocked";
               const isConfirmed = app?.status === "confirmed";
               const isPending = app?.status === "pending";
@@ -265,7 +288,10 @@ export default function Dashboard({ user }: { user: User }) {
                 "border-white/[0.08] bg-white/[0.02] text-zinc-300 hover:border-[#C9A962]/50 hover:bg-white/[0.06]";
               let label = "Açık";
 
-              if (isBlocked) {
+              if (isStaticallyClosed && !isConfirmed && !isPending) {
+                slotStyle = "border-white/[0.05] bg-white/[0.01] text-zinc-500 hover:border-[#C9A962]/30 hover:bg-white/[0.04]";
+                label = "🔒 Sabit Kapalı";
+              } else if (isBlocked) {
                 slotStyle = "border-purple-500/40 bg-purple-500/20 text-purple-200 hover:bg-purple-500/30";
                 label = "🔒 Kapalı";
               } else if (isConfirmed) {
@@ -274,6 +300,9 @@ export default function Dashboard({ user }: { user: User }) {
               } else if (isPending) {
                 slotStyle = "border-amber-500/30 bg-amber-500/10 text-amber-300 hover:border-amber-500/50";
                 label = "Bekliyor";
+              } else if (isOverriddenOpen) {
+                slotStyle = "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:border-emerald-500/50";
+                label = "Açık (Özel)";
               }
 
               return (
@@ -290,6 +319,11 @@ export default function Dashboard({ user }: { user: User }) {
               );
             })}
           </div>
+          <p className="mt-3 text-[11px] text-zinc-600">
+            🔒 Sabit Kapalı: haftalık programda sürekli kapalı olan saatler (koddan yönetilir). Bu saatlere de
+            tıklayıp AÇIK seçebilirsiniz — bu tarih için &quot;Açık (Özel)&quot; olarak işaretlenir ve statik kural
+            o gün için geçersiz kılınır.
+          </p>
         </section>
 
         {/* Saat Durumu Seçim Modalı (Açılır Pencere) */}

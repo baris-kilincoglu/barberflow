@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { createAppointment } from "@/services/appointmentService";
+import { createAppointment, subscribeToSlotStatus } from "@/services/appointmentService";
 import { ALL_SLOTS, BUSINESS, SERVICES, UNAVAILABLE_BY_WEEKDAY, WEEKLY_OCCUPANCY } from "@/lib/business";
 import {
   dateToKey,
@@ -303,17 +303,43 @@ export default function AppointmentBooking() {
 
   const selectedDay = selectedDayIndex !== null ? weekDays[selectedDayIndex] : null;
 
-  // Not: dolu saatler istemci tarafında Firestore'dan okunmuyor — appointments
-  // koleksiyonu sadece admin'e açık (bkz. firestore.rules). Burada sadece
-  // önceden belirlenmiş kapalı saatler gösterilir; gerçek çakışma kontrolü
-  // randevu kaydı sırasında appointmentService.createAppointment() içindeki
-  // transaction ile yapılır ve çakışma varsa BookingForm'da hata gösterilir.
+  // Gerçek zamanlı slot durumu: { saat: dolu mu } (bkz.
+  // services/appointmentService.ts). Kişisel veri içermez.
+  const [slotStatusMap, setSlotStatusMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!selectedDay || selectedDay.closed) {
+      setSlotStatusMap({});
+      return;
+    }
+
+    const dateKey = dateToKey(selectedDay.date);
+    return subscribeToSlotStatus(
+      dateKey,
+      setSlotStatusMap,
+      () => setSlotStatusMap({})
+    );
+  }, [selectedDay]);
+
+  // Üç durumlu mantık — hem burada hem admin panelinde aynıdır:
+  //  - slotStatusMap[saat] === true  -> dolu (randevu/admin engeli)
+  //  - slotStatusMap[saat] === false -> admin bu tarih için özellikle açtı
+  //    (statik haftalık kapanışı geçersiz kılar)
+  //  - tanımsız -> statik haftalık programa (UNAVAILABLE_BY_WEEKDAY) bakılır
   const slots = useMemo(() => {
     if (!selectedDay) return [];
     const weekdayIndex = toMondayIndex(selectedDay.date.getDay());
-    const unavailable = new Set(UNAVAILABLE_BY_WEEKDAY[weekdayIndex] ?? []);
-    return ALL_SLOTS.map((time) => ({ time, available: !unavailable.has(time) }));
-  }, [selectedDay]);
+    const staticallyClosed = new Set(UNAVAILABLE_BY_WEEKDAY[weekdayIndex] ?? []);
+
+    return ALL_SLOTS.map((time) => {
+      const override = slotStatusMap[time];
+      let available: boolean;
+      if (override === true) available = false;
+      else if (override === false) available = true;
+      else available = !staticallyClosed.has(time);
+      return { time, available };
+    });
+  }, [selectedDay, slotStatusMap]);
 
   const step = selectedTime && selectedDay ? 3 : selectedDay ? 2 : 1;
 

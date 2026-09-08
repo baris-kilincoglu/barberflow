@@ -2,9 +2,11 @@ import {
   collection,
   doc,
   onSnapshot,
+  query,
   runTransaction,
   serverTimestamp,
-  updateDoc,
+  setDoc,
+  where,
   type Unsubscribe,
 } from "firebase/firestore";
 
@@ -16,7 +18,14 @@ import type {
   NewAppointmentInput,
 } from "@/lib/types";
 
-const COLLECTION = "appointments";
+const APPOINTMENTS = "appointments";
+const SLOT_STATUS = "slotStatus";
+
+// Bir slot "dolu" (rezerve edilmiş görünür) sayılan durumlar. Müşteri
+// sayfası sadece bu bilgiyi (tarih/saat + dolu mu) görür, isim/telefon gibi
+// hiçbir kişisel veriyi görmez — bkz. slotStatus koleksiyonu ve
+// firestore.rules.
+const OCCUPIED_STATUSES: AppointmentStatus[] = ["pending", "confirmed", "blocked"];
 
 function slotId(date: string, time: string): string {
   return `${date}_${time.replace(/:/g, "-")}`;
@@ -37,12 +46,10 @@ function isValidInput(input: NewAppointmentInput): string | null {
 
 /**
  * Yeni randevu (veya admin tarafından manuel saat kapatma) oluşturur. Aynı
- * tarih+saat için bir kayıt zaten varsa (transaction ile atomik kontrol
- * edilir) hata döner — böylece iki müşteri aynı anda aynı saati alamaz.
- * Müşteri tarafından oluşturulan randevular her zaman "pending" (onay
- * bekliyor) olarak başlar; admin panelden onaylanması/reddedilmesi gerekir.
- * `status: "blocked"` sadece admin panelinden, giriş yapmış kullanıcı
- * tarafından gönderilir (bkz. firestore.rules).
+ * tarih+saat için hâlâ geçerli (pending/confirmed/blocked) bir kayıt varsa
+ * hata döner — iki müşteri aynı anda aynı saati alamaz. Aynı anda, herkese
+ * açık okunabilen `slotStatus` koleksiyonuna da (kişisel veri içermeyen)
+ * bir "dolu" işareti yazılır ki müşteri sayfası bunu görebilsin.
  */
 export async function createAppointment(
   input: NewAppointmentInput
@@ -52,16 +59,19 @@ export async function createAppointment(
     return { success: false, message: validationError };
   }
 
-  const ref = doc(collection(db, COLLECTION), slotId(input.date, input.time));
+  const id = slotId(input.date, input.time);
+  const appointmentRef = doc(collection(db, APPOINTMENTS), id);
+  const slotStatusRef = doc(collection(db, SLOT_STATUS), id);
 
   try {
     await runTransaction(db, async (transaction) => {
-      const existing = await transaction.get(ref);
-      if (existing.exists()) {
+      const existing = await transaction.get(appointmentRef);
+
+      if (existing.exists() && OCCUPIED_STATUSES.includes(existing.data().status)) {
         throw new Error("SLOT_ALREADY_BOOKED");
       }
 
-      transaction.set(ref, {
+      transaction.set(appointmentRef, {
         date: input.date,
         time: input.time,
         name: input.name.trim(),
@@ -69,6 +79,12 @@ export async function createAppointment(
         service: input.service.trim(),
         status: input.status ?? "pending",
         createdAt: serverTimestamp(),
+      });
+
+      transaction.set(slotStatusRef, {
+        date: input.date,
+        time: input.time,
+        taken: true,
       });
     });
 
@@ -91,15 +107,14 @@ export async function createAppointment(
 
 /**
  * Tüm randevuları gerçek zamanlı dinler. Sadece giriş yapmış admin
- * çağırabilir — Firestore kuralları bunu zaten zorunlu kılar, ama bu
- * fonksiyon da sadece admin panelinden kullanılmalıdır.
+ * çağırabilir — Firestore kuralları bunu zaten zorunlu kılar.
  */
 export function subscribeToAppointments(
   onData: (appointments: Appointment[]) => void,
   onError: (error: unknown) => void
 ): Unsubscribe {
   return onSnapshot(
-    collection(db, COLLECTION),
+    collection(db, APPOINTMENTS),
     (snapshot) => {
       const appointments = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
@@ -111,12 +126,75 @@ export function subscribeToAppointments(
   );
 }
 
+/**
+ * Belirli bir tarih için slotStatus durumlarını { saat: dolu mu } şeklinde
+ * bir harita olarak dinler. Üç anlamı vardır:
+ *  - harita[saat] === true  -> dolu/kapalı (randevu veya admin engeli)
+ *  - harita[saat] === false -> admin tarafından ÖZELLİKLE açık işaretlenmiş
+ *    (statik haftalık kapanış listesini bu tarih için geçersiz kılar)
+ *  - harita[saat] tanımsız   -> Firestore'da kayıt yok, statik haftalık
+ *    programa (lib/business.ts → UNAVAILABLE_BY_WEEKDAY) bakılır.
+ * Kişisel veri içermez, herkes (giriş yapmadan) çağırabilir.
+ */
+export function subscribeToSlotStatus(
+  date: string,
+  onData: (statusMap: Record<string, boolean>) => void,
+  onError: (error: unknown) => void
+): Unsubscribe {
+  const q = query(collection(db, SLOT_STATUS), where("date", "==", date));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const statusMap: Record<string, boolean> = {};
+      snapshot.docs.forEach((docSnap) => {
+        const data = docSnap.data();
+        statusMap[data.time as string] = data.taken === true;
+      });
+      onData(statusMap);
+    },
+    onError
+  );
+}
+
+/**
+ * Admin'in, statik haftalık programda kapalı görünen bir saati sadece bu
+ * tarih için "açık" yapmasını sağlar (override). Sadece giriş yapmış admin
+ * çağırabilir — bkz. firestore.rules.
+ */
+export async function setSlotOverrideOpen(date: string, time: string): Promise<void> {
+  const ref = doc(db, SLOT_STATUS, slotId(date, time));
+  await setDoc(ref, { date, time, taken: false });
+}
+
+/**
+ * Randevu durumunu günceller (onay/red/iptal/engel). Aynı transaction
+ * içinde `slotStatus` da tutarlı şekilde güncellenir: randevu hâlâ "dolu"
+ * sayılan bir duruma geçtiyse dolu işaretlenir, serbest kalan bir duruma
+ * (reddedildi/iptal) geçtiyse slotStatus kaydı tamamen silinir — böylece
+ * bir sonraki müşteri o saati temiz bir "create" olarak tekrar alabilir.
+ */
 export async function updateAppointmentStatus(
   appointmentId: string,
   status: AppointmentStatus
 ): Promise<void> {
-  await updateDoc(doc(db, COLLECTION, appointmentId), {
-    status,
-    updatedAt: serverTimestamp(),
+  const appointmentRef = doc(db, APPOINTMENTS, appointmentId);
+  const slotStatusRef = doc(db, SLOT_STATUS, appointmentId);
+
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(appointmentRef);
+    if (!snap.exists()) return;
+
+    transaction.update(appointmentRef, {
+      status,
+      updatedAt: serverTimestamp(),
+    });
+
+    if (OCCUPIED_STATUSES.includes(status)) {
+      const data = snap.data();
+      transaction.set(slotStatusRef, { date: data.date, time: data.time, taken: true });
+    } else {
+      transaction.delete(slotStatusRef);
+    }
   });
 }
