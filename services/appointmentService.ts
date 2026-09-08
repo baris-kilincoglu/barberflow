@@ -46,10 +46,11 @@ function isValidInput(input: NewAppointmentInput): string | null {
 
 /**
  * Yeni randevu (veya admin tarafından manuel saat kapatma) oluşturur. Aynı
- * tarih+saat için hâlâ geçerli (pending/confirmed/blocked) bir kayıt varsa
- * hata döner — iki müşteri aynı anda aynı saati alamaz. Aynı anda, herkese
- * açık okunabilen `slotStatus` koleksiyonuna da (kişisel veri içermeyen)
- * bir "dolu" işareti yazılır ki müşteri sayfası bunu görebilsin.
+ * tarih+saat için hâlâ dolu (slotStatus.taken === true) ise hata döner —
+ * iki müşteri aynı anda aynı saati alamaz. Çakışma kontrolü kasıtlı olarak
+ * kişisel veri İÇERMEYEN `slotStatus` koleksiyonu üzerinden yapılır, çünkü
+ * `appointments` koleksiyonu sadece admin'e açık (isim/telefon içerir) —
+ * giriş yapmamış bir müşteri o koleksiyonu okuyamaz.
  */
 export async function createAppointment(
   input: NewAppointmentInput
@@ -65,9 +66,9 @@ export async function createAppointment(
 
   try {
     await runTransaction(db, async (transaction) => {
-      const existing = await transaction.get(appointmentRef);
+      const slotSnap = await transaction.get(slotStatusRef);
 
-      if (existing.exists() && OCCUPIED_STATUSES.includes(existing.data().status)) {
+      if (slotSnap.exists() && slotSnap.data().taken === true) {
         throw new Error("SLOT_ALREADY_BOOKED");
       }
 
@@ -168,11 +169,21 @@ export async function setSlotOverrideOpen(date: string, time: string): Promise<v
 }
 
 /**
- * Randevu durumunu günceller (onay/red/iptal/engel). Aynı transaction
- * içinde `slotStatus` da tutarlı şekilde güncellenir: randevu hâlâ "dolu"
- * sayılan bir duruma geçtiyse dolu işaretlenir, serbest kalan bir duruma
- * (reddedildi/iptal) geçtiyse slotStatus kaydı tamamen silinir — böylece
- * bir sonraki müşteri o saati temiz bir "create" olarak tekrar alabilir.
+ * Randevu durumunu günceller (onay/red/iptal/engel). Sadece admin
+ * çağırmalıdır (Firestore kuralları bunu zaten zorunlu kılar).
+ *
+ * Durum "dolu" sayılan bir duruma (pending/confirmed/blocked) geçtiyse,
+ * kayıt güncellenir ve slotStatus "dolu" işaretlenir. Durum serbest
+ * bırakan bir duruma (cancelled/rejected) geçtiyse, hem appointments hem
+ * slotStatus kaydı TAMAMEN SİLİNİR — sadece durumu değiştirmek yeterli
+ * değildir, çünkü var olan bir dokümana yazmak Firestore kurallarında
+ * "update" sayılır ve bu, müşterinin (giriş yapmadan) o saati tekrar
+ * alabilmesini engeller. Silme işlemi, bir sonraki müşterinin temiz bir
+ * "create" yapabilmesini garanti eder.
+ *
+ * Not: Bu, reddedilen/iptal edilen randevuların admin panelinde kalıcı bir
+ * geçmiş olarak görünmemesi anlamına gelir — istenirse ayrı bir "geçmiş"
+ * kaydı eklenebilir.
  */
 export async function updateAppointmentStatus(
   appointmentId: string,
@@ -185,15 +196,15 @@ export async function updateAppointmentStatus(
     const snap = await transaction.get(appointmentRef);
     if (!snap.exists()) return;
 
-    transaction.update(appointmentRef, {
-      status,
-      updatedAt: serverTimestamp(),
-    });
-
     if (OCCUPIED_STATUSES.includes(status)) {
       const data = snap.data();
+      transaction.update(appointmentRef, {
+        status,
+        updatedAt: serverTimestamp(),
+      });
       transaction.set(slotStatusRef, { date: data.date, time: data.time, taken: true });
     } else {
+      transaction.delete(appointmentRef);
       transaction.delete(slotStatusRef);
     }
   });

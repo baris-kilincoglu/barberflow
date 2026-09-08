@@ -31,9 +31,15 @@ service cloud.firestore {
     }
 
     // Kişisel veri içermeyen, herkese açık "dolu saat" göstergesi.
+    // Randevu widget'ı bunu okuyarak dolu/kapalı saatleri gösterir; gerçek
+    // çakışma koruması yine appointments koleksiyonundaki transaction'da
+    // yapılır, bu koleksiyon sadece görüntüleme amaçlıdır.
     match /slotStatus/{slotId} {
       allow read: if true;
 
+      // "Dolu" işareti herkes tarafından yazılabilir (randevu alma anında,
+      // her zaman taken=true). Giriş yapmış admin ayrıca taken=false yazarak
+      // statik kapalı bir saati bu tarih için "açık" olarak işaretleyebilir.
       allow create: if
         request.resource.data.date is string &&
         request.resource.data.time is string &&
@@ -42,6 +48,8 @@ service cloud.firestore {
           request.resource.data.taken == true
         );
 
+      // Bir saati tekrar "boş" yapmak (serbest bırakmak) sadece admin
+      // işlemidir (onay/red/iptal/engel kaldırma).
       allow update, delete: if request.auth != null;
     }
 
