@@ -6,8 +6,10 @@ service cloud.firestore {
       allow read: if request.auth != null;
 
       // Herkes randevu oluşturabilir, ama sadece "pending" olarak.
-      // Giriş yapmış admin ayrıca bir saati manuel "blocked" olarak da
-      // işaretleyebilir (isim/telefon zorunlu değil).
+      // Giriş yapmış admin ayrıca bir saati manuel "blocked" olarak
+      // işaretleyebilir, ya da telefonla gelen bir randevuyu doğrudan
+      // "confirmed" (onaylı) olarak kaydedebilir (isim/telefon/hizmet
+      // zorunlu, çünkü gerçek bir müşteri kaydıdır).
       allow create: if
         request.resource.data.date is string &&
         request.resource.data.time is string &&
@@ -15,6 +17,13 @@ service cloud.firestore {
           (
             request.auth != null &&
             request.resource.data.status == 'blocked'
+          ) ||
+          (
+            request.auth != null &&
+            request.resource.data.status == 'confirmed' &&
+            request.resource.data.name is string && request.resource.data.name.size() > 0 &&
+            request.resource.data.phone is string && request.resource.data.phone.size() > 0 &&
+            request.resource.data['service'] is string
           ) ||
           (
             request.resource.data.status == 'pending' &&

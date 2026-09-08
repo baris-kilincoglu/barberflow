@@ -20,7 +20,7 @@ import {
   toMondayIndex,
   weekDates,
 } from "@/lib/dates";
-import { ALL_SLOTS, BUSINESS, UNAVAILABLE_BY_WEEKDAY } from "@/lib/business";
+import { ALL_SLOTS, BUSINESS, SERVICES, UNAVAILABLE_BY_WEEKDAY } from "@/lib/business";
 
 function getStatusLabel(status: AppointmentStatus): string {
   switch (status) {
@@ -89,6 +89,54 @@ export default function Dashboard({ user }: { user: User }) {
 
   // Saat Durumu Değiştirme Modalı
   const [selectedTimeForModal, setSelectedTimeForModal] = useState<string | null>(null);
+
+  // Telefonla gelen randevular için manuel ekleme formu (aynı modal içinde).
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
+  const [manualService, setManualService] = useState<string>(SERVICES[0]);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualError, setManualError] = useState("");
+
+  function openSlotModal(time: string) {
+    setSelectedTimeForModal(time);
+    setShowManualForm(false);
+    setManualName("");
+    setManualPhone("");
+    setManualService(SERVICES[0]);
+    setManualError("");
+  }
+
+  function closeSlotModal() {
+    setSelectedTimeForModal(null);
+    setShowManualForm(false);
+  }
+
+  async function handleManualBooking(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedTimeForModal) return;
+
+    setManualSaving(true);
+    setManualError("");
+
+    const result = await createAppointment({
+      date: selectedDate,
+      time: selectedTimeForModal,
+      name: manualName,
+      phone: manualPhone,
+      service: manualService,
+      status: "confirmed",
+    });
+
+    setManualSaving(false);
+
+    if (!result.success) {
+      setManualError(result.message);
+      return;
+    }
+
+    closeSlotModal();
+  }
 
   const [weekOffset, setWeekOffset] = useState(0);
   const dates = useMemo(() => weekDates(weekOffset).map(dateToKey), [weekOffset]);
@@ -183,7 +231,7 @@ export default function Dashboard({ user }: { user: User }) {
             await updateAppointmentStatus(existing.id, "blocked");
           }
         } else {
-          await createAppointment({
+          const result = await createAppointment({
             date: selectedDate,
             time,
             name: "Yönetici Engeli",
@@ -191,6 +239,10 @@ export default function Dashboard({ user }: { user: User }) {
             service: "Manuel Kapatıldı",
             status: "blocked",
           });
+
+          if (!result.success) {
+            setError(result.message);
+          }
         }
       }
     } catch {
@@ -310,7 +362,7 @@ export default function Dashboard({ user }: { user: User }) {
                   key={time}
                   type="button"
                   disabled={actionId === time || actionId === app?.id}
-                  onClick={() => setSelectedTimeForModal(time)}
+                  onClick={() => openSlotModal(time)}
                   className={`flex flex-col items-center justify-center rounded-xl border p-2.5 transition ${slotStyle}`}
                 >
                   <span className="text-xs font-bold">{time}</span>
@@ -330,39 +382,125 @@ export default function Dashboard({ user }: { user: User }) {
         {selectedTimeForModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
             <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#121212] p-6 shadow-2xl">
-              <h3 className="text-lg font-semibold text-white">Saat Durumu Ayarla</h3>
+              <h3 className="text-lg font-semibold text-white">
+                {showManualForm ? "Telefonla Randevu Ekle" : "Saat Durumu Ayarla"}
+              </h3>
               <p className="mt-1 text-sm text-zinc-400">
                 <span className="font-semibold text-[#C9A962]">{formatLongDate(selectedDate)}</span> saat{" "}
-                <span className="font-semibold text-white">{selectedTimeForModal}</span> için durum seçiniz:
+                <span className="font-semibold text-white">{selectedTimeForModal}</span>{" "}
+                {showManualForm ? "için müşteri bilgilerini girin:" : "için durum seçiniz:"}
               </p>
 
-              <div className="mt-6 space-y-3">
+              {!showManualForm ? (
+                <div className="mt-6 space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => applySlotStatus("OPEN")}
+                    className="flex w-full items-center justify-between rounded-xl border border-green-500/30 bg-green-500/10 p-3.5 text-left text-sm font-semibold text-green-300 transition hover:bg-green-500/20"
+                  >
+                    <span>Randevu Alımına AÇIK</span>
+                    <span>🔓</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => applySlotStatus("BLOCKED")}
+                    className="flex w-full items-center justify-between rounded-xl border border-purple-500/30 bg-purple-500/10 p-3.5 text-left text-sm font-semibold text-purple-300 transition hover:bg-purple-500/20"
+                  >
+                    <span>Randevu Alımına KAPALI</span>
+                    <span>🔒</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowManualForm(true)}
+                    className="flex w-full items-center justify-between rounded-xl border border-[#C9A962]/30 bg-[#C9A962]/10 p-3.5 text-left text-sm font-semibold text-[#C9A962] transition hover:bg-[#C9A962]/20"
+                  >
+                    <span>Telefonla Randevu Ekle</span>
+                    <span>📞</span>
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleManualBooking} className="mt-5 space-y-3">
+                  <div>
+                    <label htmlFor="manual-name" className="mb-1 block text-xs font-medium text-zinc-400">
+                      Ad Soyad
+                    </label>
+                    <input
+                      id="manual-name"
+                      type="text"
+                      value={manualName}
+                      onChange={(e) => setManualName(e.target.value)}
+                      placeholder="Müşteri adı soyadı"
+                      className="w-full rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-[#C9A962]/50"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="manual-phone" className="mb-1 block text-xs font-medium text-zinc-400">
+                      Telefon
+                    </label>
+                    <input
+                      id="manual-phone"
+                      type="tel"
+                      value={manualPhone}
+                      onChange={(e) => setManualPhone(e.target.value)}
+                      placeholder="05XX XXX XX XX"
+                      className="w-full rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-[#C9A962]/50"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="manual-service" className="mb-1 block text-xs font-medium text-zinc-400">
+                      Hizmet
+                    </label>
+                    <select
+                      id="manual-service"
+                      value={manualService}
+                      onChange={(e) => setManualService(e.target.value)}
+                      className="w-full appearance-none rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-[#C9A962]/50"
+                    >
+                      {SERVICES.map((s) => (
+                        <option key={s} value={s} className="bg-[#111]">
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {manualError && (
+                    <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs text-red-300">
+                      {manualError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={manualSaving}
+                    className="mt-1 w-full rounded-xl bg-[#C9A962] py-2.5 text-sm font-semibold text-black transition hover:bg-[#D4B872] disabled:opacity-50"
+                  >
+                    {manualSaving ? "Kaydediliyor..." : "Randevuyu Kaydet (Onaylı)"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowManualForm(false)}
+                    className="w-full text-center text-xs text-zinc-500 transition hover:text-zinc-300"
+                  >
+                    ← Geri
+                  </button>
+                </form>
+              )}
+
+              {!showManualForm && (
                 <button
                   type="button"
-                  onClick={() => applySlotStatus("OPEN")}
-                  className="flex w-full items-center justify-between rounded-xl border border-green-500/30 bg-green-500/10 p-3.5 text-left text-sm font-semibold text-green-300 transition hover:bg-green-500/20"
+                  onClick={closeSlotModal}
+                  className="mt-4 w-full rounded-xl border border-white/10 py-2.5 text-xs text-zinc-400 transition hover:bg-white/5 hover:text-white"
                 >
-                  <span>Randevu Alımına AÇIK</span>
-                  <span>🔓</span>
+                  Vazgeç
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => applySlotStatus("BLOCKED")}
-                  className="flex w-full items-center justify-between rounded-xl border border-purple-500/30 bg-purple-500/10 p-3.5 text-left text-sm font-semibold text-purple-300 transition hover:bg-purple-500/20"
-                >
-                  <span>Randevu Alımına KAPALI</span>
-                  <span>🔒</span>
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setSelectedTimeForModal(null)}
-                className="mt-4 w-full rounded-xl border border-white/10 py-2.5 text-xs text-zinc-400 transition hover:bg-white/5 hover:text-white"
-              >
-                Vazgeç
-              </button>
+              )}
             </div>
           </div>
         )}
